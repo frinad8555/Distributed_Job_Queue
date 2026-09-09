@@ -19,7 +19,6 @@ router.post("/", async (req, res) => {
              RETURNING *`,
             [type, payload, priority || 0]
         );
-
         res.status(201).json(result.rows[0]);
 
     } catch (error) {
@@ -43,7 +42,6 @@ router.get("/:id", async (req, res) => {
                 error: "Job not found"
             });
         }
-
         res.json(result.rows[0]);
 
     } catch (error) {
