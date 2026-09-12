@@ -21,17 +21,22 @@ async function giveHeartbeat(jobID) {
 
 async function processJob() {
     const client = await pool.connect();
+    let job = null;
 
     try {
         await client.query("BEGIN");
 
         const result = await client.query(
             `SELECT *
-             FROM jobs
-             WHERE status = 'QUEUED'
-             ORDER BY priority DESC, created_at
-             FOR UPDATE SKIP LOCKED
-             LIMIT 1`
+            FROM jobs
+            WHERE status = 'QUEUED'
+              AND (
+                    next_retry_at IS NULL
+                    OR next_retry_at <= CURRENT_TIMESTAMP
+                  )
+            ORDER BY priority DESC, created_at
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1;`
         );
 
         if (result.rows.length === 0) {
@@ -39,13 +44,14 @@ async function processJob() {
             return false;
         }
 
-        const job = result.rows[0];
+        job = result.rows[0];
 
         await client.query(
             `UPDATE jobs
              SET status = 'RUNNING',
                  started_at = CURRENT_TIMESTAMP,
-                 last_heartbeat = CURRENT_TIMESTAMP
+                 last_heartbeat = CURRENT_TIMESTAMP,
+                 next_retry_at = NULL
              WHERE id = $1`,
             [job.id]
         );
@@ -54,12 +60,13 @@ async function processJob() {
 
         console.log(`Worker ${process.pid} picked job ${job.id}`);
         console.log(`Processing job ${job.id}...`);
+                
+        await sleep(3000);
+        throw new Error("Simulated job failure");
 
         const heartbeat = setInterval(() => {
             giveHeartbeat(job.id);
         }, 5000);
-
-        await sleep(20000);
 
         await client.query(
             `UPDATE jobs
@@ -76,9 +83,38 @@ async function processJob() {
 
     } catch (error) {
         await client.query("ROLLBACK");
-        console.error("Worker error:", error.message);
-        return false;
+    
+        console.error(`Job ${job.id} has failed: `, error.message);
+    
+        if (job) {
+            const rtCount = job.retry_count + 1;
 
+            if(rtCount <= job.max_retries) {
+                const delayTime = Math.pow(2, rtCount);
+                await pool.query(
+                    `UPDATE jobs
+                     SET status = 'QUEUED',
+                         retry_count = $2,
+                         next_retry_at = CURRENT_TIMESTAMP + ($3*INTERVAL '1 second')
+                     WHERE id = $1`,
+                    [job.id, rtCount, delayTime]
+                );
+
+                console.log(`Retry ${rtCount}/${job.max_retries} scheduled in ${delayTime} seconds.`);
+            }
+            else {
+                await pool.query(
+                    `UPDATE jobs
+                     SET status = 'FAILED'
+                     WHERE id = $1`,
+                    [job.id]
+                );
+
+                console.log(`Job ${job.id} failed permanently.`);
+            }
+        }
+    
+        return false;
     } finally {
         client.release();
     }
