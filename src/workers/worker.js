@@ -60,9 +60,25 @@ async function processJob() {
 
         console.log(`Worker ${process.pid} picked job ${job.id}`);
         console.log(`Processing job ${job.id}...`);
-                
+
+        const processedResult = await pool.query(
+            `INSERT INTO processed_jobs (idempotency_key)
+             VALUES ($1)
+             ON CONFLICT (idempotency_key) DO NOTHING
+             RETURNING idempotency_key`,
+            [job.idempotency_key]
+        );
+        
+        if (processedResult.rows.length === 0) {
+            console.log(
+                `SIDE EFFECT SKIPPED: Job ${job.id} was already processed.`
+            );
+        } else {
+            console.log(`SIDE EFFECT: Executing job ${job.id}`);
+        }
+        
+        process.exit(1);
         await sleep(3000);
-        throw new Error("Simulated job failure");
 
         const heartbeat = setInterval(() => {
             giveHeartbeat(job.id);

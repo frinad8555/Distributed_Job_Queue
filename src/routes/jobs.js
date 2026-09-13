@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.post("/", async (req, res) => {
     try {
-        const { type, payload, priority } = req.body;
+        const { type, payload, priority, idempotency_key } = req.body;
 
         if (!type || !payload) {
             return res.status(400).json({
@@ -14,15 +14,29 @@ router.post("/", async (req, res) => {
         }
 
         const result = await pool.query(
-            `INSERT INTO jobs (type, payload, priority)
-             VALUES ($1, $2, $3)
+            `INSERT INTO jobs (type, payload, priority, idempotency_key)
+             VALUES ($1, $2, $3, $4)
              RETURNING *`,
-            [type, payload, priority || 0]
+            [type, payload, priority || 0, idempotency_key]
         );
         res.status(201).json(result.rows[0]);
 
     } catch (error) {
         console.error(error.message);
+
+        if (error.code === "23505") { // unique violation
+            const existingJob = await pool.query(
+                `SELECT *
+                 FROM jobs
+                 WHERE idempotency_key = $1`,
+                [req.body.idempotency_key]
+            );
+    
+            return res.status(409).json({
+                error: "Job with this idempotency key already exists",
+                job: existingJob.rows[0]
+            });
+        }
 
         res.status(500).json({
             error: "Failed to create job"
