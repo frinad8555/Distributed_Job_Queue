@@ -77,7 +77,6 @@ async function processJob() {
             console.log(`SIDE EFFECT: Executing job ${job.id}`);
         }
         
-        process.exit(1);
         await sleep(3000);
 
         const heartbeat = setInterval(() => {
