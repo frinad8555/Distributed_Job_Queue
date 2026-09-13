@@ -76,9 +76,9 @@ async function processJob() {
         } else {
             console.log(`SIDE EFFECT: Executing job ${job.id}`);
         }
-        
-        await sleep(3000);
 
+        await sleep(3000);
+        throw new error('Job failed deliberately');
         const heartbeat = setInterval(() => {
             giveHeartbeat(job.id);
         }, 5000);
@@ -120,12 +120,12 @@ async function processJob() {
             else {
                 await pool.query(
                     `UPDATE jobs
-                     SET status = 'FAILED'
+                     SET status = 'DEAD_LETTER'
                      WHERE id = $1`,
                     [job.id]
                 );
 
-                console.log(`Job ${job.id} failed permanently.`);
+                console.log(`Job ${job.id} has been added to Dead Letter Queue as it exhausted its max retries.`);
             }
         }
     

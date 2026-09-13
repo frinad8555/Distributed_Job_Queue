@@ -44,6 +44,26 @@ router.post("/", async (req, res) => {
     }
 });
 
+router.get("/dead-letter", async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT *
+             FROM jobs
+             WHERE status = 'DEAD_LETTER'
+             ORDER BY created_at`
+        );
+
+        res.json(result.rows);
+
+    } catch (error) {
+        console.error(error.message);
+
+        res.status(500).json({
+            error: "Failed to fetch dead-letter jobs"
+        });
+    }
+});
+
 router.get("/:id", async (req, res) => {
     try {
         const result = await pool.query(
