@@ -1,6 +1,8 @@
 const pool = require("../db");
 const workerId = `worker-${process.pid}`;
 
+let isShuttingDown = false;
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -30,6 +32,10 @@ async function processJob() {
     let heartbeat = null;
 
     try {
+        if (isShuttingDown) {
+            return false;
+        }
+
         await client.query("BEGIN");
 
         const result = await client.query(
@@ -50,6 +56,11 @@ async function processJob() {
             return false;
         }
 
+        if (isShuttingDown) {
+            await client.query("ROLLBACK");
+            return false;
+        }
+        
         job = result.rows[0];
 
         await client.query(
@@ -63,6 +74,11 @@ async function processJob() {
             [job.id, workerId]
         );
 
+        if (isShuttingDown) {
+            await client.query("ROLLBACK");
+            return false;
+        }
+
         await client.query("COMMIT");
 
         heartbeat = setInterval(() => {
@@ -71,7 +87,7 @@ async function processJob() {
 
         console.log(`Worker ${process.pid} picked job ${job.id}`);
         console.log(`Processing job ${job.id}...`);
-
+        
         const processedResult = await pool.query(
             `INSERT INTO processed_jobs (idempotency_key)
              VALUES ($1)
@@ -93,8 +109,7 @@ async function processJob() {
             SET status = 'COMPLETED',
                 completed_at = CURRENT_TIMESTAMP,
                 worker_id = NULL,
-                last_heartbeat = NULL,
-                lease_expires_at = NULL
+                last_heartbeat = NULL
             WHERE id = $1
             AND status = 'RUNNING'
             AND worker_id = $2`,
@@ -129,8 +144,7 @@ async function processJob() {
                      CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
                  worker_id = NULL,
                  last_heartbeat = NULL,
-                 started_at = NULL,
-                 lease_expires_at = NULL
+                 started_at = NULL
              WHERE id = $1
                AND status = 'RUNNING'
                AND worker_id = $2`,
@@ -151,8 +165,7 @@ async function processJob() {
                     `UPDATE jobs
                     SET status = 'DEAD_LETTER',
                         worker_id = NULL,
-                        last_heartbeat = NULL,
-                        lease_expires_at = NULL
+                        last_heartbeat = NULL
                     WHERE id = $1
                     AND status = 'RUNNING'
                     AND worker_id = $2`,
@@ -186,22 +199,55 @@ async function startWorker() {
 
     let queueEmpty = false;
 
-    while (true) {
-        const processed = await processJob();
+    try {
+        while(!isShuttingDown) {
+            const processed = await processJob();
 
-        if (!processed) {
-            if (!queueEmpty) {
-                console.log(
-                    "All queued jobs have been processed. Waiting for new jobs..."
-                );
-                queueEmpty = true;
+            if(isShuttingDown) {
+                break;
             }
 
-            await sleep(2000);
-        } else {
-            queueEmpty = false;
+            if (!processed) {
+                if (!queueEmpty) {
+                    console.log(
+                        "All queued jobs have been processed. Waiting for new jobs..."
+                    );
+                    queueEmpty = true;
+                }
+
+                await sleep(2000);
+            } else {
+                queueEmpty = false;
+            }
         }
+    }
+    finally {
+        await pool.end();
+
+        console.log(`Worker ${process.pid} shut down cleanly`);
     }
 }
 
-startWorker();
+
+function handleShutdown(signal) {
+    if (isShuttingDown) {
+        console.error(
+            `Received ${signal} again. Forcing shutdown.`
+        );
+        process.exit(1);
+    }
+
+    console.log(
+        `Received ${signal}. Shutting down worker...`
+    );
+
+    isShuttingDown = true;
+}
+
+process.once("SIGINT", () => handleShutdown("SIGINT"));
+process.once("SIGTERM", () => handleShutdown("SIGTERM"));
+
+startWorker().catch(error => {
+    console.error("Worker terminated unexpectedly: ", error);
+    process.exitCode = 1;
+});

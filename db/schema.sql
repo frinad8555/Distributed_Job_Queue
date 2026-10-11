@@ -14,6 +14,5 @@ CREATE TABLE jobs (
     completed_at TIMESTAMP,
     last_heartbeat TIMESTAMP,
 
-    worker_id VARCHAR(100),
-    lease_expires_at TIMESTAMP,
+    worker_id VARCHAR(100)
 );
