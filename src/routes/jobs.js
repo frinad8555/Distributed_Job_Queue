@@ -87,4 +87,52 @@ router.get("/:id", async (req, res) => {
     }
 });
 
+router.post("/:id/retry", async (req, res) => {
+    try {
+        const result = await pool.query(
+            `UPDATE jobs
+             SET status = 'QUEUED',
+                 retry_count = 0,
+                 next_retry_at = NULL,
+                 started_at = NULL,
+                 completed_at = NULL,
+                 last_heartbeat = NULL
+             WHERE id = $1
+               AND status = 'DEAD_LETTER'
+             RETURNING *`,
+            [req.params.id]
+        );
+
+        if (result.rows.length === 0) {
+            const existingJob = await pool.query(
+                "SELECT * FROM jobs WHERE id = $1",
+                [req.params.id]
+            );
+
+            if (existingJob.rows.length === 0) {
+                return res.status(404).json({
+                    error: "Job not found"
+                });
+            }
+
+            return res.status(409).json({
+                error: "Only DEAD_LETTER jobs can be retried",
+                status: existingJob.rows[0].status
+            });
+        }
+
+        res.json({
+            message: "Job requeued successfully",
+            job: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error(error.message);
+
+        res.status(500).json({
+            error: "Failed to retry job"
+        });
+    }
+});
+
 module.exports = router;

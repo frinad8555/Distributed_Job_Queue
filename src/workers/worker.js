@@ -1,27 +1,33 @@
 const pool = require("../db");
+const workerId = `worker-${process.pid}`;
 
 function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function giveHeartbeat(jobID) {
     try {
-        await pool.query(
+        const result = await pool.query(
             `UPDATE jobs
              SET last_heartbeat = CURRENT_TIMESTAMP
              WHERE id = $1
-             AND status = 'RUNNING'`,
-            [jobID]
+               AND status = 'RUNNING'
+               AND worker_id = $2`,
+            [jobID, workerId]
         );
-    }
-    catch (error) {
-        console.error(`Heartbeat failed for job: ${jobID}: `, error.message);
+
+        if (result.rowCount === 0) {
+            console.log(`Worker ${workerId} no longer owns job ${jobID}`);
+        }
+    } catch (error) {
+        console.error(`Heartbeat failed for job ${jobID}:`, error.message);
     }
 }
 
 async function processJob() {
     const client = await pool.connect();
     let job = null;
+    let heartbeat = null;
 
     try {
         await client.query("BEGIN");
@@ -49,14 +55,19 @@ async function processJob() {
         await client.query(
             `UPDATE jobs
              SET status = 'RUNNING',
+                 worker_id = $2,
                  started_at = CURRENT_TIMESTAMP,
                  last_heartbeat = CURRENT_TIMESTAMP,
                  next_retry_at = NULL
              WHERE id = $1`,
-            [job.id]
+            [job.id, workerId]
         );
 
         await client.query("COMMIT");
+
+        heartbeat = setInterval(() => {
+            giveHeartbeat(job.id);
+        }, 5000);
 
         console.log(`Worker ${process.pid} picked job ${job.id}`);
         console.log(`Processing job ${job.id}...`);
@@ -68,69 +79,104 @@ async function processJob() {
              RETURNING idempotency_key`,
             [job.idempotency_key]
         );
-        
+
         if (processedResult.rows.length === 0) {
-            console.log(
-                `SIDE EFFECT SKIPPED: Job ${job.id} was already processed.`
-            );
+            console.log(`SIDE EFFECT SKIPPED: Job ${job.id} was already processed.`);
         } else {
             console.log(`SIDE EFFECT: Executing job ${job.id}`);
         }
 
         await sleep(3000);
-        throw new error('Job failed deliberately');
-        const heartbeat = setInterval(() => {
-            giveHeartbeat(job.id);
-        }, 5000);
 
-        await client.query(
+        const completion = await pool.query(
             `UPDATE jobs
-             SET status = 'COMPLETED',
-                 completed_at = CURRENT_TIMESTAMP
-             WHERE id = $1`,
-            [job.id]
+            SET status = 'COMPLETED',
+                completed_at = CURRENT_TIMESTAMP,
+                worker_id = NULL,
+                last_heartbeat = NULL,
+                lease_expires_at = NULL
+            WHERE id = $1
+            AND status = 'RUNNING'
+            AND worker_id = $2`,
+            [job.id, workerId]
         );
-        
-        clearInterval(heartbeat);
+
+        if (completion.rowCount === 0) {
+            console.log(
+                `Worker ${workerId} lost ownership of job ${job.id}; completion skipped.`
+            );
+            return false;
+        }
+
         console.log(`Job ${job.id} COMPLETED`);
-
         return true;
-
     } catch (error) {
         await client.query("ROLLBACK");
-    
+
         console.error(`Job ${job.id} has failed: `, error.message);
-    
+
         if (job) {
-            const rtCount = job.retry_count + 1;
+            const retryCount = job.retry_count + 1;
 
-            if(rtCount <= job.max_retries) {
-                const delayTime = Math.pow(2, rtCount);
-                await pool.query(
+            if (retryCount <= job.max_retries) {
+                const delayTime = Math.pow(2, retryCount);
+
+                const result = await pool.query(
                     `UPDATE jobs
-                     SET status = 'QUEUED',
-                         retry_count = $2,
-                         next_retry_at = CURRENT_TIMESTAMP + ($3*INTERVAL '1 second')
-                     WHERE id = $1`,
-                    [job.id, rtCount, delayTime]
+             SET status = 'QUEUED',
+                 retry_count = $3,
+                 next_retry_at =
+                     CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
+                 worker_id = NULL,
+                 last_heartbeat = NULL,
+                 started_at = NULL,
+                 lease_expires_at = NULL
+             WHERE id = $1
+               AND status = 'RUNNING'
+               AND worker_id = $2`,
+                    [job.id, workerId, retryCount, delayTime]
                 );
 
-                console.log(`Retry ${rtCount}/${job.max_retries} scheduled in ${delayTime} seconds.`);
-            }
-            else {
-                await pool.query(
+                if (result.rowCount > 0) {
+                    console.log(
+                        `Retry ${retryCount}/${job.max_retries} scheduled in ${delayTime} seconds.`
+                    );
+                } else {
+                    console.log(
+                        `Worker ${workerId} no longer owns job ${job.id}; failure update skipped.`
+                    );
+                }
+            } else {
+                const result = await pool.query(
                     `UPDATE jobs
-                     SET status = 'DEAD_LETTER'
-                     WHERE id = $1`,
-                    [job.id]
+                    SET status = 'DEAD_LETTER',
+                        worker_id = NULL,
+                        last_heartbeat = NULL,
+                        lease_expires_at = NULL
+                    WHERE id = $1
+                    AND status = 'RUNNING'
+                    AND worker_id = $2`,
+                    [job.id, workerId]
                 );
 
-                console.log(`Job ${job.id} has been added to Dead Letter Queue as it exhausted its max retries.`);
+                if (result.rowCount > 0) {
+                    console.log(
+                        `Job ${job.id} moved to DEAD_LETTER after exhausting retries.`
+                    );
+                } else {
+                    console.log(
+                        `Worker ${workerId} no longer owns job ${job.id}; failure update skipped.`
+                    );
+                }
             }
         }
-    
+
         return false;
     } finally {
+        if (heartbeat) {
+            clearInterval(heartbeat);
+        }
+
         client.release();
     }
 }
