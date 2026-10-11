@@ -1,3 +1,4 @@
+
 CREATE TABLE jobs (
     id BIGSERIAL PRIMARY KEY,
     type VARCHAR(100) NOT NULL,
@@ -14,5 +15,11 @@ CREATE TABLE jobs (
     completed_at TIMESTAMP,
     last_heartbeat TIMESTAMP,
 
-    worker_id VARCHAR(100)
+    worker_id VARCHAR(100),
+    idempotency_key VARCHAR(255) UNIQUE
+);
+
+CREATE TABLE processed_jobs (
+    idempotency_key VARCHAR(255) PRIMARY KEY,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

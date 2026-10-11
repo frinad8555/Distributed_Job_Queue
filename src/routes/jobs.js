@@ -7,9 +7,45 @@ router.post("/", async (req, res) => {
     try {
         const { type, payload, priority, idempotency_key } = req.body;
 
-        if (!type || !payload) {
+        // Validate type
+        if (
+            typeof type !== "string" ||
+            type.trim().length === 0 ||
+            type.length > 100
+        ) {
             return res.status(400).json({
-                error: "type and payload are required"
+                error: "type must be a non-empty string of at most 100 characters"
+            });
+        }
+
+        // Validate payload
+        if (payload === undefined || payload === null) {
+            return res.status(400).json({
+                error: "payload is required and cannot be null"
+            });
+        }
+
+        // Validate priority
+        if (
+            priority !== undefined &&
+            (!Number.isInteger(priority) || priority < 0)
+        ) {
+            return res.status(400).json({
+                error: "priority must be a non-negative integer"
+            });
+        }
+
+        // Validate idempotency_key when provided
+        if (
+            idempotency_key !== undefined &&
+            (
+                typeof idempotency_key !== "string" ||
+                idempotency_key.trim().length === 0 ||
+                idempotency_key.length > 255
+            )
+        ) {
+            return res.status(400).json({
+                error: "idempotency_key must be a non-empty string of at most 255 characters"
             });
         }
 
