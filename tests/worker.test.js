@@ -106,3 +106,34 @@ test("processJob dead-letters a job after retries are exhausted", async () => {
     assert.equal(result.rows[0].worker_id, null);
     assert.equal(result.rows[0].last_heartbeat, null);
 });
+
+
+test("two concurrent workers process different jobs", async () => {
+    const inserted = await pool.query(
+        `INSERT INTO jobs (type, payload, status, priority)
+         VALUES
+            ('CONCURRENT_TEST', '{"n": 1}', 'QUEUED', 1),
+            ('CONCURRENT_TEST', '{"n": 2}', 'QUEUED', 1)
+         RETURNING id`
+    );
+
+    const jobIds = inserted.rows.map(row => row.id.toString());
+
+    const results = await Promise.all([
+        processJob(),
+        processJob()
+    ]);
+
+    assert.deepEqual(results, [true, true]);
+
+    const completed = await pool.query(
+        `SELECT id, status
+         FROM jobs
+         WHERE id = ANY($1::bigint[])
+         ORDER BY id`,
+        [jobIds]
+    );
+
+    assert.equal(completed.rows.length, 2);
+    assert.ok(completed.rows.every(job => job.status === "COMPLETED"));
+});
