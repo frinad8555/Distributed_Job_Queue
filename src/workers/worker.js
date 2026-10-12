@@ -30,6 +30,7 @@ async function processJob() {
     const client = await pool.connect();
     let job = null;
     let heartbeat = null;
+    let transactionOpen = false;
 
     try {
         if (isShuttingDown) {
@@ -37,6 +38,7 @@ async function processJob() {
         }
 
         await client.query("BEGIN");
+        transactionOpen = true;
 
         const result = await client.query(
             `SELECT *
@@ -53,11 +55,13 @@ async function processJob() {
 
         if (result.rows.length === 0) {
             await client.query("ROLLBACK");
+            transactionOpen = false;
             return false;
         }
 
         if (isShuttingDown) {
             await client.query("ROLLBACK");
+            transactionOpen = false;
             return false;
         }
         
@@ -76,10 +80,12 @@ async function processJob() {
 
         if (isShuttingDown) {
             await client.query("ROLLBACK");
+            transactionOpen = false;
             return false;
         }
 
         await client.query("COMMIT");
+        transactionOpen = false;
 
         heartbeat = setInterval(() => {
             giveHeartbeat(job.id);
@@ -126,7 +132,15 @@ async function processJob() {
         console.log(`Job ${job.id} COMPLETED`);
         return true;
     } catch (error) {
-        await client.query("ROLLBACK");
+        if (transactionOpen) {
+            try {
+                await client.query("ROLLBACK");
+            } catch (rollbackError) {
+                console.error("Rollback failed:", rollbackError.message);
+            } finally {
+                transactionOpen = false;
+            }
+        }
 
         console.error(`Job ${job.id} has failed: `, error.message);
 
@@ -247,7 +261,11 @@ function handleShutdown(signal) {
 process.once("SIGINT", () => handleShutdown("SIGINT"));
 process.once("SIGTERM", () => handleShutdown("SIGTERM"));
 
-startWorker().catch(error => {
-    console.error("Worker terminated unexpectedly: ", error);
-    process.exitCode = 1;
-});
+module.exports = { processJob, startWorker };
+
+if (require.main === module) {
+    startWorker().catch(error => {
+        console.error("Worker terminated unexpectedly:", error);
+        process.exitCode = 1;
+    });
+}
