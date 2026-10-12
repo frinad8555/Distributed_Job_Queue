@@ -80,6 +80,123 @@ router.post("/", async (req, res) => {
     }
 });
 
+router.get("/", async (req, res) => {
+    try {
+        const { status, priority } = req.query;
+
+        // Pagination defaults
+        const limit = req.query.limit === undefined
+            ? 20
+            : Number(req.query.limit);
+
+        const offset = req.query.offset === undefined
+            ? 0
+            : Number(req.query.offset);
+
+        // Validate status
+        const allowedStatuses = [
+            "QUEUED",
+            "RUNNING",
+            "COMPLETED",
+            "DEAD_LETTER"
+        ];
+
+        if (
+            status !== undefined &&
+            (typeof status !== "string" ||
+             !allowedStatuses.includes(status))
+        ) {
+            return res.status(400).json({
+                error: "Invalid status"
+            });
+        }
+
+        // Validate priority
+        if (
+            priority !== undefined &&
+            (
+                typeof priority !== "string" ||
+                !/^\d+$/.test(priority) ||
+                !Number.isSafeInteger(Number(priority))
+            )
+        ) {
+            return res.status(400).json({
+                error: "priority must be a non-negative integer"
+            });
+        }
+
+        // Validate pagination
+        if (
+            req.query.limit !== undefined &&
+            (
+                typeof req.query.limit !== "string" ||
+                !/^\d+$/.test(req.query.limit) ||
+                !Number.isSafeInteger(limit) ||
+                limit < 1 ||
+                limit > 100
+            )
+        ) {
+            return res.status(400).json({
+                error: "limit must be an integer between 1 and 100"
+            });
+        }
+
+        if (
+            req.query.offset !== undefined &&
+            (
+                typeof req.query.offset !== "string" ||
+                !/^\d+$/.test(req.query.offset) ||
+                !Number.isSafeInteger(offset)
+            )
+        ) {
+            return res.status(400).json({
+                error: "offset must be a non-negative integer"
+            });
+        }
+
+        const conditions = [];
+        const values = [];
+
+        if (status !== undefined) {
+            values.push(status);
+            conditions.push(`status = $${values.length}`);
+        }
+
+        if (priority !== undefined) {
+            values.push(Number(priority));
+            conditions.push(`priority = $${values.length}`);
+        }
+
+        const whereClause = conditions.length
+            ? `WHERE ${conditions.join(" AND ")}`
+            : "";
+
+        values.push(limit);
+        const limitParam = `$${values.length}`;
+
+        values.push(offset);
+        const offsetParam = `$${values.length}`;
+
+        const result = await pool.query(
+            `SELECT *
+             FROM jobs
+             ${whereClause}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ${limitParam}
+             OFFSET ${offsetParam}`,
+            values
+        );
+
+        res.json(result.rows);
+    } catch (error) {
+        console.error(error.message);
+
+        res.status(500).json({
+            error: "Failed to fetch jobs"
+        });
+    }
+});
+
 router.get("/dead-letter", async (req, res) => {
     try {
         const result = await pool.query(

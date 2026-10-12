@@ -1,35 +1,50 @@
-const pool = require('../db');
-const STALETIME = 15;
+const pool = require("../db");
+
+const STALE_TIME_SECONDS = 15;
+const POLL_INTERVAL_MS = 5000;
 
 async function recoverJobs() {
-    try {
-        const result = await pool.query(
-            `UPDATE jobs
-             SET status = 'QUEUED',
-                 started_at = NULL
-             WHERE status = 'RUNNING'
-             AND last_heartbeat < CURRENT_TIMESTAMP - INTERVAL '${STALETIME} seconds'
-             RETURNING id`
-        );
+    const result = await pool.query(
+        `UPDATE jobs
+         SET status = 'QUEUED',
+             started_at = NULL,
+             worker_id = NULL,
+             last_heartbeat = NULL
+         WHERE status = 'RUNNING'
+           AND last_heartbeat <
+               CURRENT_TIMESTAMP - ($1 * INTERVAL '1 second')
+         RETURNING id`,
+        [STALE_TIME_SECONDS]
+    );
 
-        if(result.rows.length > 0) {
-            for (const job of result.rows) {
-                console.log(`Recovered stale job ${job.id}`);
-            }
-        }
+    for (const job of result.rows) {
+        console.log(`Recovered stale job ${job.id}`);
     }
-    catch(error) {
-        console.error('Error in recovering a job: ', error.message);
-    }
+
+    return result.rows;
 }
 
 async function startRecovery() {
-    console.log('Recovery Process Started');
+    console.log("Recovery Process Started");
 
-    while(true) {
-        await recoverJobs();
-        await new Promise(resolve => setTimeout(resolve, 5000));
+    while (true) {
+        try {
+            await recoverJobs();
+        } catch (error) {
+            console.error("Error recovering jobs:", error.message);
+        }
+
+        await new Promise(resolve =>
+            setTimeout(resolve, POLL_INTERVAL_MS)
+        );
     }
 }
 
-startRecovery();
+module.exports = { recoverJobs, startRecovery };
+
+if (require.main === module) {
+    startRecovery().catch(error => {
+        console.error("Recovery process terminated:", error);
+        process.exitCode = 1;
+    });
+}

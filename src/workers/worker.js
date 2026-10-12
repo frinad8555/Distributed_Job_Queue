@@ -33,6 +33,7 @@ async function processJob(
     let job = null;
     let heartbeat = null;
     let transactionOpen = false;
+    let idempotencyLockAcquired = false;
 
     try {
         if (isShuttingDown) {
@@ -94,33 +95,49 @@ async function processJob(
         }, 5000);
 
         console.log(`Worker ${process.pid} picked job ${job.id}`);
-        console.log(`Processing job ${job.id}...`);
-        
+        console.log(`Processing job ${job.id}...`);    
         
         let shouldExecute = true;
 
         if (job.idempotency_key) {
-            const processedResult = await pool.query(
-                `INSERT INTO processed_jobs (idempotency_key)
-                VALUES ($1)
-                ON CONFLICT (idempotency_key) DO NOTHING
-                RETURNING idempotency_key`,
+            // Serialize execution for this idempotency key.
+            await client.query(
+                `SELECT pg_advisory_lock(hashtextextended($1, 0))`,
                 [job.idempotency_key]
             );
 
-            shouldExecute = processedResult.rows.length > 0;
+            idempotencyLockAcquired = true;
+
+            // Recheck after acquiring the lock.
+            const processedResult = await client.query(
+                `SELECT 1
+                FROM processed_jobs
+                WHERE idempotency_key = $1`,
+                [job.idempotency_key]
+            );
+
+            shouldExecute = processedResult.rows.length === 0;
         }
 
-        if (!shouldExecute) {
+        if (shouldExecute) {
+            console.log(`SIDE EFFECT: Executing job ${job.id}`);
+
+            await executeJob(job);
+
+            // Record success only after execution succeeds.
+            if (job.idempotency_key) {
+                await client.query(
+                    `INSERT INTO processed_jobs (idempotency_key)
+                    VALUES ($1)
+                    ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [job.idempotency_key]
+                );
+            }
+        } else {
             console.log(
                 `SIDE EFFECT SKIPPED: Job ${job.id} was already processed.`
             );
-        } 
-        else {
-            console.log(`SIDE EFFECT: Executing job ${job.id}`);
         }
-
-        await executeJob(job);
 
         const completion = await pool.query(
             `UPDATE jobs
@@ -216,6 +233,19 @@ async function processJob(
             clearInterval(heartbeat);
         }
 
+        if (idempotencyLockAcquired && job?.idempotency_key) {
+            try {
+                await client.query(
+                    `SELECT pg_advisory_unlock(hashtextextended($1, 0))`,
+                    [job.idempotency_key]
+                );
+            } catch (error) {
+                console.error("Failed to release idempotency lock:", error.message);
+                client.release(error);
+                return;
+            }
+        }
+
         client.release();
     }
 }
@@ -253,7 +283,6 @@ async function startWorker() {
         console.log(`Worker ${process.pid} shut down cleanly`);
     }
 }
-
 
 function handleShutdown(signal) {
     if (isShuttingDown) {
