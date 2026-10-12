@@ -26,7 +26,9 @@ async function giveHeartbeat(jobID) {
     }
 }
 
-async function processJob() {
+async function processJob(
+    executeJob = async () => sleep(3000)
+) {
     const client = await pool.connect();
     let job = null;
     let heartbeat = null;
@@ -94,21 +96,31 @@ async function processJob() {
         console.log(`Worker ${process.pid} picked job ${job.id}`);
         console.log(`Processing job ${job.id}...`);
         
-        const processedResult = await pool.query(
-            `INSERT INTO processed_jobs (idempotency_key)
-             VALUES ($1)
-             ON CONFLICT (idempotency_key) DO NOTHING
-             RETURNING idempotency_key`,
-            [job.idempotency_key]
-        );
+        
+        let shouldExecute = true;
 
-        if (processedResult.rows.length === 0) {
-            console.log(`SIDE EFFECT SKIPPED: Job ${job.id} was already processed.`);
-        } else {
+        if (job.idempotency_key) {
+            const processedResult = await pool.query(
+                `INSERT INTO processed_jobs (idempotency_key)
+                VALUES ($1)
+                ON CONFLICT (idempotency_key) DO NOTHING
+                RETURNING idempotency_key`,
+                [job.idempotency_key]
+            );
+
+            shouldExecute = processedResult.rows.length > 0;
+        }
+
+        if (!shouldExecute) {
+            console.log(
+                `SIDE EFFECT SKIPPED: Job ${job.id} was already processed.`
+            );
+        } 
+        else {
             console.log(`SIDE EFFECT: Executing job ${job.id}`);
         }
 
-        await sleep(3000);
+        await executeJob(job);
 
         const completion = await pool.query(
             `UPDATE jobs
