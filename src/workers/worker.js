@@ -27,7 +27,8 @@ async function giveHeartbeat(jobID) {
 }
 
 async function processJob(
-    executeJob = async () => sleep(3000)
+    executeJob = async () =>
+        sleep(Number(process.env.JOB_PROCESSING_DELAY_MS ?? 3000))
 ) {
     const client = await pool.connect();
     let job = null;
@@ -271,7 +272,7 @@ async function startWorker() {
                     queueEmpty = true;
                 }
 
-                await sleep(2000);
+                await sleep(100);
             } else {
                 queueEmpty = false;
             }
