@@ -31,87 +31,14 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
+  Sector,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-
-const throughputData = [
-  { time: "00:00", jobs: 120 },
-  { time: "02:00", jobs: 185 },
-  { time: "04:00", jobs: 150 },
-  { time: "06:00", jobs: 290 },
-  { time: "08:00", jobs: 240 },
-  { time: "10:00", jobs: 365 },
-  { time: "12:00", jobs: 315 },
-  { time: "14:00", jobs: 440 },
-  { time: "16:00", jobs: 385 },
-  { time: "18:00", jobs: 510 },
-  { time: "20:00", jobs: 460 },
-  { time: "22:00", jobs: 580 },
-];
-
-const statusData = [
-  { name: "Completed", value: 8421, color: "#34d399" },
-  { name: "Queued", value: 128, color: "#a78bfa" },
-  { name: "Running", value: 12, color: "#60a5fa" },
-  { name: "Failed", value: 7, color: "#fb7185" },
-];
-
-const initialJobs = [
-  {
-    id: "job_a81f2c",
-    type: "send-email",
-    status: "COMPLETED",
-    priority: 3,
-    attempts: "1 / 3",
-    created: "12 sec ago",
-  },
-  {
-    id: "job_b239d1",
-    type: "generate-report",
-    status: "RUNNING",
-    priority: 5,
-    attempts: "1 / 3",
-    created: "24 sec ago",
-  },
-  {
-    id: "job_c614e8",
-    type: "sync-records",
-    status: "QUEUED",
-    priority: 2,
-    attempts: "0 / 3",
-    created: "38 sec ago",
-  },
-  {
-    id: "job_d803a7",
-    type: "process-payment",
-    status: "COMPLETED",
-    priority: 5,
-    attempts: "1 / 3",
-    created: "51 sec ago",
-  },
-  {
-    id: "job_e427b9",
-    type: "send-notification",
-    status: "DEAD_LETTER",
-    priority: 1,
-    attempts: "3 / 3",
-    created: "2 min ago",
-  },
-  {
-    id: "job_f195c3",
-    type: "resize-image",
-    status: "QUEUED",
-    priority: 2,
-    attempts: "0 / 3",
-    created: "3 min ago",
-  },
-];
 
 const navGroups = [
   {
@@ -214,6 +141,35 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
+function PieStatusTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+
+  const item = payload[0];
+
+  return (
+    <div
+      style={{
+        backgroundColor: "#111827",
+        border: "1px solid #475569",
+        borderRadius: "8px",
+        padding: "10px 14px",
+        color: "#FFFFFF",
+        opacity: 1,
+        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.6)",
+        pointerEvents: "none",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <p style={{ margin: 0, fontSize: "13px", fontWeight: 600 }}>
+        {item.name}
+      </p>
+      <p style={{ margin: "4px 0 0", fontSize: "13px" }}>
+        {Number(item.value).toLocaleString()} jobs
+      </p>
+    </div>
+  );
+}
+
 function Sidebar({ activePage, setActivePage, onClose }) {
   const [jobCount, setJobCount] = useState(0);
   const [deadLetterCount, setDeadLetterCount] = useState(0);
@@ -301,8 +257,8 @@ function Sidebar({ activePage, setActivePage, onClose }) {
                       onClose?.();
                     }}
                     className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${selected
-                        ? "border border-violet-400/15 bg-violet-500/10 text-violet-200"
-                        : "border border-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white"
+                      ? "border border-violet-400/15 bg-violet-500/10 text-violet-200"
+                      : "border border-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white"
                       }`}
                   >
                     <Icon
@@ -317,8 +273,8 @@ function Sidebar({ activePage, setActivePage, onClose }) {
                     {item.label === "Jobs" && (
                       <span
                         className={`rounded-md px-1.5 py-0.5 text-[10px] ${selected
-                            ? "bg-violet-400/15 text-violet-200"
-                            : "bg-slate-800 text-slate-400"
+                          ? "bg-violet-400/15 text-violet-200"
+                          : "bg-slate-800 text-slate-400"
                           }`}
                       >
                         {jobCount}
@@ -328,8 +284,8 @@ function Sidebar({ activePage, setActivePage, onClose }) {
                     {item.label === "Dead-letter queue" && (
                       <span
                         className={`rounded-md px-1.5 py-0.5 text-[10px] ${selected
-                            ? "bg-violet-400/15 text-violet-200"
-                            : "bg-slate-800 text-slate-400"
+                          ? "bg-violet-400/15 text-violet-200"
+                          : "bg-slate-800 text-slate-400"
                           }`}
                       >
                         {deadLetterCount}
@@ -347,8 +303,8 @@ function Sidebar({ activePage, setActivePage, onClose }) {
         <button
           onClick={() => setActivePage("Settings")}
           className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${activePage === "Settings"
-              ? "bg-violet-500/10 text-violet-200"
-              : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            ? "bg-violet-500/10 text-violet-200"
+            : "text-slate-400 hover:bg-slate-800 hover:text-white"
             }`}
         >
           <Settings2 size={17} />
@@ -423,12 +379,34 @@ function Header({ activePage, onMenuClick }) {
 }
 
 function Overview() {
-  const [period, setPeriod] = useState("24 hours");
   const [jobFilter, setJobFilter] = useState("ALL");
   const [jobs, setJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [jobsError, setJobsError] = useState("");
   const [stats, setStats] = useState(null);
+
+  const statusData = [
+    {
+      name: "Completed",
+      value: Number(stats?.completedJobs ?? 0),
+      fill: "#34D399",
+    },
+    {
+      name: "Queued",
+      value: Number(stats?.queuedJobs ?? 0),
+      fill: "#A78BFA",
+    },
+    {
+      name: "Running",
+      value: Number(stats?.runningJobs ?? 0),
+      fill: "#60A5FA",
+    },
+    {
+      name: "Dead Letter",
+      value: Number(stats?.deadLetterJobs ?? 0),
+      fill: "#EF4444",
+    },
+  ];
 
   useEffect(() => {
     let active = true;
@@ -511,14 +489,14 @@ function Overview() {
       ? jobs
       : jobs.filter((job) => job.status === jobFilter);
 
-    const jobCounts = {
-      COMPLETED: stats?.completedJobs ?? 0,
-      QUEUED: stats?.queuedJobs ?? 0,
-      RUNNING: stats?.runningJobs ?? 0,
-      DEAD_LETTER: stats?.deadLetterJobs ?? 0,
-    };
-      
+  const jobCounts = {
+    COMPLETED: stats?.completedJobs ?? 0,
+    QUEUED: stats?.queuedJobs ?? 0,
+    RUNNING: stats?.runningJobs ?? 0,
+    DEAD_LETTER: stats?.deadLetterJobs ?? 0,
+  };
 
+  console.log("Status data:", statusData);
   return (
     <>
       <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -560,7 +538,7 @@ function Overview() {
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        
+
         <MetricCard
           title="Total jobs"
           value={(stats?.totalJobs ?? 0).toLocaleString()}
@@ -614,40 +592,37 @@ function Overview() {
             <div>
               <h2 className="font-semibold text-white">Job throughput</h2>
               <p className="mt-1 text-xs text-slate-500">
-                Jobs processed over time
+                Jobs created over the last 7 days
               </p>
             </div>
-            <select
-              value={period}
-              onChange={(event) => setPeriod(event.target.value)}
-              className="rounded-lg border border-dashboard-border bg-[#0B1020] px-3 py-2 text-xs text-slate-300 outline-none focus:border-violet-400"
-            >
-              <option>24 hours</option>
-              <option>7 days</option>
-              <option>30 days</option>
-            </select>
           </div>
 
           <div className="mb-4 flex flex-wrap items-end gap-8">
             <div>
               <p className="text-3xl font-semibold tracking-tight text-white">
-                4,892
+                {(stats?.dailyJobs ?? [])
+                  .reduce((total, day) => total + Number(day.jobs), 0)
+                  .toLocaleString()}
               </p>
-              <p className="mt-1 text-xs text-slate-500">Jobs processed</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Jobs created
+              </p>
             </div>
+
             <div className="pb-1">
-              <p className="flex items-center gap-1 text-sm font-medium text-emerald-300">
-                <ArrowUpRight size={15} />
-                18.6%
+              <p className="text-sm font-medium text-slate-400">
+                Live statistics
               </p>
-              <p className="mt-1 text-xs text-slate-500">vs. previous period</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Refreshed every 5 seconds
+              </p>
             </div>
           </div>
 
           <div className="h-[245px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={throughputData}
+                data={stats?.dailyJobs ?? []}
                 margin={{ top: 8, right: 5, left: -22, bottom: 0 }}
               >
                 <defs>
@@ -662,14 +637,14 @@ function Overview() {
                   vertical={false}
                 />
                 <XAxis
-                  dataKey="time"
-                  axisLine={false}
+                  dataKey="date"
+                  axisLine={true}
                   tickLine={false}
                   tick={{ fill: "#64748b", fontSize: 10 }}
                   dy={10}
                 />
                 <YAxis
-                  axisLine={false}
+                  axisLine={true}
                   tickLine={false}
                   tick={{ fill: "#64748b", fontSize: 10 }}
                   tickCount={5}
@@ -694,7 +669,6 @@ function Overview() {
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <span className="h-2 w-2 rounded-full bg-violet-400" />
             Processed jobs
-            <span className="ml-auto">Illustrative data</span>
           </div>
         </section>
 
@@ -715,26 +689,24 @@ function Overview() {
                   nameKey="name"
                   innerRadius={65}
                   outerRadius={88}
-                  paddingAngle={4}
+                  paddingAngle={0}
+                  minAngle={2}
                   stroke="none"
-                >
-                  {statusData.map((item) => (
-                    <Cell key={item.name} fill={item.color} />
-                  ))}
-                </Pie>
+                />
+
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#111827",
-                    border: "1px solid #334155",
-                    borderRadius: "8px",
-                    color: "#fff",
-                    fontSize: "12px",
+                  content={<PieStatusTooltip />}
+                  shared={false}
+                  wrapperStyle={{
+                    zIndex: 1000,
+                    outline: "none",
+                    pointerEvents: "none",
                   }}
                 />
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-semibold text-white">8,568</span>
+              <span className="text-2xl font-semibold text-white">{stats?.totalJobs}</span>
               <span className="mt-1 text-[10px] text-slate-500">
                 Total jobs
               </span>
