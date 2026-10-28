@@ -27,7 +27,7 @@ router.get("/", async (_req, res) => {
                ON j.worker_id = w.worker_id
               AND j.status = 'RUNNING'
              GROUP BY w.worker_id, w.started_at, w.last_heartbeat, w.stopped_at
-             ORDER BY w.stopped_at NULLS FIRST, w.last_heartbeat DESC, w.worker_id`
+             ORDER BY w.stopped_at DESC NULLS FIRST, w.worker_id`
         );
 
         res.json(result.rows.map((worker) => ({
