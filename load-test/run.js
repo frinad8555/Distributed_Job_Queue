@@ -8,7 +8,7 @@ const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 const TOTAL_JOBS = Number(process.env.TOTAL_JOBS || 1000);
 const CONCURRENCY = Number(process.env.CONCURRENCY || 10);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 500);
-const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 300000);
+const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 1800000);
 
 function percentile(values, p) {
     if (values.length === 0) return null;

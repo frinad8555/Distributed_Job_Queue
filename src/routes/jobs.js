@@ -1,10 +1,12 @@
 const express = require("express");
 const pool = require("../db");
+const { ensureMetricsSchema } = require("../metrics/events");
 
 const router = express.Router();
 
 router.post("/", async (req, res) => {
     try {
+        await ensureMetricsSchema();
         const { type, payload, priority, idempotency_key } = req.body;
 
         // Validate type
@@ -50,9 +52,16 @@ router.post("/", async (req, res) => {
         }
 
         const result = await pool.query(
-            `INSERT INTO jobs (type, payload, priority, idempotency_key)
-             VALUES ($1, $2, $3, $4)
-             RETURNING *`,
+            `WITH new_job AS (
+                INSERT INTO jobs (type, payload, priority, idempotency_key)
+                VALUES ($1, $2, $3, $4)
+                RETURNING *
+             ), logged_event AS (
+                INSERT INTO job_events (job_id, event_type, queue_delta)
+                SELECT id, 'queued', 1 FROM new_job
+                RETURNING job_id
+             )
+             SELECT * FROM new_job`,
             [type, payload, priority || 0, idempotency_key]
         );
         res.status(201).json(result.rows[0]);
@@ -253,7 +262,7 @@ router.get("/stats", async (req, res) => {
         GROUP BY day
         ORDER BY day;
       `;
-  
+
       const [statsResult, trendResult] = await Promise.all([
         pool.query(statsQuery),
         pool.query(trendQuery),
@@ -300,17 +309,25 @@ router.get("/:id", async (req, res) => {
 
 router.post("/:id/retry", async (req, res) => {
     try {
+        await ensureMetricsSchema();
         const result = await pool.query(
-            `UPDATE jobs
-             SET status = 'QUEUED',
-                 retry_count = 0,
-                 next_retry_at = NULL,
-                 started_at = NULL,
-                 completed_at = NULL,
-                 last_heartbeat = NULL
-             WHERE id = $1
-               AND status = 'DEAD_LETTER'
-             RETURNING *`,
+            `WITH requeued_job AS (
+                UPDATE jobs
+                SET status = 'QUEUED',
+                    retry_count = 0,
+                    next_retry_at = NULL,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    dead_letter_at = NULL,
+                    last_heartbeat = NULL
+                WHERE id = $1 AND status = 'DEAD_LETTER'
+                RETURNING *
+             ), logged_event AS (
+                INSERT INTO job_events (job_id, event_type, queue_delta)
+                SELECT id, 'retry_queued', 1 FROM requeued_job
+                RETURNING job_id
+             )
+             SELECT * FROM requeued_job`,
             [req.params.id]
         );
 

@@ -13,6 +13,7 @@ CREATE TABLE jobs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
+    dead_letter_at TIMESTAMP,
     last_heartbeat TIMESTAMP,
 
     worker_id VARCHAR(100),
@@ -29,4 +30,19 @@ CREATE TABLE workers (
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     stopped_at TIMESTAMP
+);
+
+CREATE TABLE job_events (
+    id BIGSERIAL PRIMARY KEY,
+    job_id BIGINT NOT NULL,
+    event_type VARCHAR(40) NOT NULL,
+    queue_delta INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX job_events_created_at_idx ON job_events (created_at);
+
+CREATE TABLE metrics_metadata (
+    key VARCHAR(100) PRIMARY KEY,
+    value TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

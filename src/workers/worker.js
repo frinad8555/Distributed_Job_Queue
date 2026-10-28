@@ -1,5 +1,6 @@
 const pool = require("../db");
 const { registerWorker, heartbeatWorker, stopWorker } = require("./registry");
+const { ensureMetricsSchema } = require("../metrics/events");
 const workerId = `worker-${process.pid}`;
 
 let isShuttingDown = false;
@@ -82,6 +83,10 @@ async function processJob(
              WHERE id = $1`,
             [job.id, workerId]
         );
+        await client.query(
+            "INSERT INTO job_events (job_id, event_type, queue_delta) VALUES ($1, 'started', -1)",
+            [job.id]
+        );
 
         if (isShuttingDown) {
             await client.query("ROLLBACK");
@@ -145,14 +150,18 @@ async function processJob(
         }
 
         const completion = await pool.query(
-            `UPDATE jobs
-            SET status = 'COMPLETED',
-                completed_at = CURRENT_TIMESTAMP,
-                worker_id = NULL,
-                last_heartbeat = NULL
-            WHERE id = $1
-            AND status = 'RUNNING'
-            AND worker_id = $2`,
+            `WITH completed_job AS (
+                UPDATE jobs
+                SET status = 'COMPLETED',
+                    completed_at = CURRENT_TIMESTAMP,
+                    worker_id = NULL,
+                    last_heartbeat = NULL
+                WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
+                RETURNING id
+             )
+             INSERT INTO job_events (job_id, event_type, queue_delta)
+             SELECT id, 'completed', 0 FROM completed_job
+             RETURNING job_id`,
             [job.id, workerId]
         );
 
@@ -185,18 +194,21 @@ async function processJob(
                 const delayTime = Math.pow(2, retryCount);
 
                 const result = await pool.query(
-                    `UPDATE jobs
-                     SET status = 'QUEUED',
-                         retry_count = $3,
-                         next_retry_at =
-                             CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
-                         worker_id = NULL,
-                         last_heartbeat = NULL,
-                         started_at = NULL,
-                         last_error = $5
-                     WHERE id = $1
-                       AND status = 'RUNNING'
-                       AND worker_id = $2`,
+                    `WITH retry_job AS (
+                        UPDATE jobs
+                        SET status = 'QUEUED',
+                            retry_count = $3,
+                            next_retry_at = CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
+                            worker_id = NULL,
+                            last_heartbeat = NULL,
+                            started_at = NULL,
+                            last_error = $5
+                        WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
+                        RETURNING id
+                     )
+                     INSERT INTO job_events (job_id, event_type, queue_delta)
+                     SELECT id, 'retry_queued', 1 FROM retry_job
+                     RETURNING job_id`,
                     [
                       job.id,
                       workerId,
@@ -217,14 +229,19 @@ async function processJob(
                 }
             } else {
                 const result = await pool.query(
-                    `UPDATE jobs
-                     SET status = 'DEAD_LETTER',
-                         worker_id = NULL,
-                         last_heartbeat = NULL,
-                         last_error = $3
-                     WHERE id = $1
-                       AND status = 'RUNNING'
-                       AND worker_id = $2`,
+                    `WITH failed_job AS (
+                        UPDATE jobs
+                        SET status = 'DEAD_LETTER',
+                            dead_letter_at = CURRENT_TIMESTAMP,
+                            worker_id = NULL,
+                            last_heartbeat = NULL,
+                            last_error = $3
+                        WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
+                        RETURNING id
+                     )
+                     INSERT INTO job_events (job_id, event_type, queue_delta)
+                     SELECT id, 'dead_lettered', 0 FROM failed_job
+                     RETURNING job_id`,
                     [
                       job.id,
                       workerId,
@@ -270,6 +287,7 @@ async function processJob(
 async function startWorker() {
     console.log(`Worker ${process.pid} started`);
 
+    await ensureMetricsSchema();
     await registerWorker(workerId);
     const registryHeartbeat = setInterval(() => {
         heartbeatWorker(workerId).catch(error => {

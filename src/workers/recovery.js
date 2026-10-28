@@ -1,19 +1,27 @@
 const pool = require("../db");
+const { ensureMetricsSchema } = require("../metrics/events");
 
 const STALE_TIME_SECONDS = 15;
 const POLL_INTERVAL_MS = 5000;
 
 async function recoverJobs() {
+    await ensureMetricsSchema();
     const result = await pool.query(
-        `UPDATE jobs
-         SET status = 'QUEUED',
-             started_at = NULL,
-             worker_id = NULL,
-             last_heartbeat = NULL
-         WHERE status = 'RUNNING'
-           AND last_heartbeat <
-               CURRENT_TIMESTAMP - ($1 * INTERVAL '1 second')
-         RETURNING id`,
+        `WITH recovered_jobs AS (
+            UPDATE jobs
+            SET status = 'QUEUED',
+                started_at = NULL,
+                worker_id = NULL,
+                last_heartbeat = NULL
+            WHERE status = 'RUNNING'
+              AND last_heartbeat < CURRENT_TIMESTAMP - ($1 * INTERVAL '1 second')
+            RETURNING id
+         ), logged_events AS (
+            INSERT INTO job_events (job_id, event_type, queue_delta)
+            SELECT id, 'recovered', 1 FROM recovered_jobs
+            RETURNING job_id
+         )
+         SELECT id FROM recovered_jobs`,
         [STALE_TIME_SECONDS]
     );
 
