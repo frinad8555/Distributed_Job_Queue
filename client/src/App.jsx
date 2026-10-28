@@ -319,7 +319,7 @@ function Sidebar({ activePage, setActivePage, onClose }) {
               Local development
             </p>
             <p className="mt-1 truncate text-[10px] text-slate-500">
-              Mock environment
+              Queue service
             </p>
           </div>
           <Ellipsis size={17} className="text-slate-500" />
@@ -378,12 +378,16 @@ function Header({ activePage, onMenuClick }) {
   );
 }
 
-function Overview() {
+function Overview({ onViewAllJobs }) {
   const [jobFilter, setJobFilter] = useState("ALL");
   const [jobs, setJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [jobsError, setJobsError] = useState("");
   const [stats, setStats] = useState(null);
+  const [createJobOpen, setCreateJobOpen] = useState(false);
+  const [creatingJob, setCreatingJob] = useState(false);
+  const [createJobError, setCreateJobError] = useState("");
+  const [createJobForm, setCreateJobForm] = useState({ type: "", payload: "{}", priority: "0", idempotencyKey: "" });
 
   const statusData = [
     {
@@ -496,7 +500,51 @@ function Overview() {
     DEAD_LETTER: stats?.deadLetterJobs ?? 0,
   };
 
-  console.log("Status data:", statusData);
+  async function createJob(event) {
+    event.preventDefault();
+    setCreateJobError("");
+
+    let payload;
+    try {
+      payload = JSON.parse(createJobForm.payload);
+      if (payload === null) throw new Error("Payload cannot be null.");
+    } catch (error) {
+      setCreateJobError(error instanceof SyntaxError ? "Enter valid JSON for the payload." : error.message);
+      return;
+    }
+
+    setCreatingJob(true);
+    try {
+      const body = {
+        type: createJobForm.type.trim(),
+        payload,
+        priority: Number(createJobForm.priority),
+      };
+      if (createJobForm.idempotencyKey.trim()) body.idempotency_key = createJobForm.idempotencyKey.trim();
+
+      const response = await fetch("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to create job.");
+
+      setJobs((current) => [data, ...current.filter((job) => job.id !== data.id)]);
+      setCreateJobOpen(false);
+      setCreateJobForm({ type: "", payload: "{}", priority: "0", idempotencyKey: "" });
+      setStats((current) => current ? {
+        ...current,
+        totalJobs: Number(current.totalJobs ?? 0) + 1,
+        queuedJobs: Number(current.queuedJobs ?? 0) + 1,
+      } : current);
+    } catch (error) {
+      setCreateJobError(error.message || "Failed to create job.");
+    } finally {
+      setCreatingJob(false);
+    }
+  }
+
   return (
     <>
       <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -524,11 +572,7 @@ function Overview() {
             Refresh
           </button>
           <button
-            onClick={() =>
-              window.alert(
-                "Job creation will be enabled when the dashboard is connected to your API."
-              )
-            }
+            onClick={() => { setCreateJobError(""); setCreateJobOpen(true); }}
             className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-3.5 py-2.5 text-xs font-semibold text-white shadow-lg shadow-violet-500/10 transition hover:bg-violet-400"
           >
             <Plus size={15} />
@@ -552,7 +596,7 @@ function Overview() {
           title="Total completed"
           value={jobCounts.COMPLETED.toLocaleString()}
           change="Live count"
-          description="completed jobs in loaded data"
+          description="completed jobs"
           icon={CheckCircle2}
           iconColor="bg-emerald-400/10 text-emerald-300"
         />
@@ -570,7 +614,7 @@ function Overview() {
           title="Currently running"
           value={jobCounts.RUNNING.toLocaleString()}
           change="Live count"
-          description="active executions in loaded data"
+          description="active executions"
           icon={Play}
           iconColor="bg-blue-400/10 text-blue-300"
         />
@@ -718,7 +762,7 @@ function Overview() {
               <div key={item.name} className="flex items-center gap-2.5">
                 <span
                   className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: item.color }}
+                  style={{ backgroundColor: item.fill }}
                 />
                 <span className="flex-1 text-xs text-slate-400">
                   {item.name}
@@ -766,11 +810,7 @@ function Overview() {
               </select>
             </div>
             <button
-              onClick={() =>
-                window.alert(
-                  "The full job explorer will be implemented in the next step."
-                )
-              }
+              onClick={onViewAllJobs}
               className="rounded-lg border border-dashboard-border px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
             >
               View all jobs
@@ -871,17 +911,48 @@ function Overview() {
 
         <div className="flex flex-col justify-between gap-2 border-t border-dashboard-border px-6 py-4 text-xs text-slate-500 sm:flex-row sm:items-center">
           <span>Showing {filteredJobs.length} jobs</span>
-          <span>Pagination will be added with the API integration.</span>
+          <span>Latest jobs in your queue</span>
         </div>
       </section>
 
       <footer className="mt-6 flex flex-col justify-between gap-2 pb-2 text-[11px] text-slate-600 sm:flex-row">
         <span>QueueFlow · Job Queue Management</span>
-        <span className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-          Preview mode — data is not live
-        </span>
       </footer>
+
+      {createJobOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !creatingJob) setCreateJobOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="create-job-title" className="w-full max-w-lg rounded-2xl border border-dashboard-border bg-[#111827] p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <h2 id="create-job-title" className="text-lg font-semibold text-white">Create job</h2>
+                <p className="mt-1 text-sm text-slate-400">Add a job to the queue.</p>
+              </div>
+              <button type="button" onClick={() => setCreateJobOpen(false)} disabled={creatingJob} aria-label="Close dialog" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-50"><XCircle size={18} /></button>
+            </div>
+            <form onSubmit={createJob} className="space-y-4">
+              <label className="block text-sm text-slate-300">Job type
+                <input required maxLength={100} value={createJobForm.type} onChange={(event) => setCreateJobForm({ ...createJobForm, type: event.target.value })} className="mt-1.5 w-full rounded-lg border border-dashboard-border bg-[#0B1020] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400" placeholder="e.g. send_email" />
+              </label>
+              <label className="block text-sm text-slate-300">Payload (JSON)
+                <textarea required rows={5} value={createJobForm.payload} onChange={(event) => setCreateJobForm({ ...createJobForm, payload: event.target.value })} className="mt-1.5 w-full rounded-lg border border-dashboard-border bg-[#0B1020] px-3 py-2.5 font-mono text-sm text-white outline-none focus:border-violet-400" />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm text-slate-300">Priority
+                  <input type="number" min="0" step="1" required value={createJobForm.priority} onChange={(event) => setCreateJobForm({ ...createJobForm, priority: event.target.value })} className="mt-1.5 w-full rounded-lg border border-dashboard-border bg-[#0B1020] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400" />
+                </label>
+                <label className="block text-sm text-slate-300">Idempotency key <span className="text-slate-500">(optional)</span>
+                  <input maxLength={255} value={createJobForm.idempotencyKey} onChange={(event) => setCreateJobForm({ ...createJobForm, idempotencyKey: event.target.value })} className="mt-1.5 w-full rounded-lg border border-dashboard-border bg-[#0B1020] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400" />
+                </label>
+              </div>
+              {createJobError && <p role="alert" className="text-sm text-rose-300">{createJobError}</p>}
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setCreateJobOpen(false)} disabled={creatingJob} className="rounded-lg border border-dashboard-border px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50">Cancel</button>
+                <button type="submit" disabled={creatingJob} className="rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-400 disabled:opacity-50">{creatingJob ? "Creating…" : "Create job"}</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -1681,7 +1752,7 @@ function PlaceholderPage({ page }) {
         {info.description}
       </p>
       <div className="mt-6 rounded-lg border border-dashboard-border bg-dashboard-panel px-4 py-3 text-xs text-slate-500">
-        This section will be implemented in the next development step.
+        This section is coming soon.
       </div>
     </div>
   );
@@ -1724,7 +1795,7 @@ export default function App() {
           />
           <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">
             {activePage === "Overview" ? (
-              <Overview />
+              <Overview onViewAllJobs={() => setActivePage("Jobs")} />
             ) : activePage === "Jobs" ? (
               <JobsPage />
             ) : activePage === "Dead-letter queue" ? (

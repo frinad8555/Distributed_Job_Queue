@@ -123,6 +123,9 @@ async function processJob(
         if (shouldExecute) {
             console.log(`SIDE EFFECT: Executing job ${job.id}`);
 
+            if (job.type === "intentional_failure_test") {
+                throw new Error("Intentional failure for dead-letter testing");
+            }
             await executeJob(job);
 
             // Record success only after execution succeeds.
@@ -182,18 +185,25 @@ async function processJob(
 
                 const result = await pool.query(
                     `UPDATE jobs
-             SET status = 'QUEUED',
-                 retry_count = $3,
-                 next_retry_at =
-                     CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
-                 worker_id = NULL,
-                 last_heartbeat = NULL,
-                 started_at = NULL
-             WHERE id = $1
-               AND status = 'RUNNING'
-               AND worker_id = $2`,
-                    [job.id, workerId, retryCount, delayTime]
-                );
+                     SET status = 'QUEUED',
+                         retry_count = $3,
+                         next_retry_at =
+                             CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
+                         worker_id = NULL,
+                         last_heartbeat = NULL,
+                         started_at = NULL,
+                         last_error = $5
+                     WHERE id = $1
+                       AND status = 'RUNNING'
+                       AND worker_id = $2`,
+                    [
+                      job.id,
+                      workerId,
+                      retryCount,
+                      delayTime,
+                      error?.message || String(error),
+                    ]
+                  );
 
                 if (result.rowCount > 0) {
                     console.log(
@@ -207,13 +217,18 @@ async function processJob(
             } else {
                 const result = await pool.query(
                     `UPDATE jobs
-                    SET status = 'DEAD_LETTER',
-                        worker_id = NULL,
-                        last_heartbeat = NULL
-                    WHERE id = $1
-                    AND status = 'RUNNING'
-                    AND worker_id = $2`,
-                    [job.id, workerId]
+                     SET status = 'DEAD_LETTER',
+                         worker_id = NULL,
+                         last_heartbeat = NULL,
+                         last_error = $3
+                     WHERE id = $1
+                       AND status = 'RUNNING'
+                       AND worker_id = $2`,
+                    [
+                      job.id,
+                      workerId,
+                      error?.message || String(error),
+                    ]
                 );
 
                 if (result.rowCount > 0) {

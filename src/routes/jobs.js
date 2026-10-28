@@ -217,6 +217,64 @@ router.get("/dead-letter", async (req, res) => {
     }
 });
 
+
+router.get("/stats", async (req, res) => {
+    try {
+      const statsQuery = `
+        SELECT
+          COUNT(*)::int AS total_jobs,
+          COUNT(*) FILTER (
+            WHERE status = 'QUEUED'
+          )::int AS queued_jobs,
+          COUNT(*) FILTER (
+            WHERE status = 'RUNNING'
+          )::int AS running_jobs,
+          COUNT(*) FILTER (
+            WHERE status = 'COMPLETED'
+          )::int AS completed_jobs,
+          COUNT(*) FILTER (
+            WHERE status = 'DEAD_LETTER'
+          )::int AS dead_letter_jobs
+        FROM jobs;
+      `;
+  
+      const trendQuery = `
+        SELECT
+          TO_CHAR(day, 'Mon DD') AS date,
+          COUNT(j.id)::int AS jobs
+        FROM generate_series(
+          CURRENT_DATE - INTERVAL '6 days',
+          CURRENT_DATE,
+          INTERVAL '1 day'
+        ) AS day
+        LEFT JOIN jobs j
+          ON j.created_at >= day
+          AND j.created_at < day + INTERVAL '1 day'
+        GROUP BY day
+        ORDER BY day;
+      `;
+  
+      const [statsResult, trendResult] = await Promise.all([
+        pool.query(statsQuery),
+        pool.query(trendQuery),
+      ]);
+  
+      const stats = statsResult.rows[0];
+  
+      res.json({
+        totalJobs: stats.total_jobs,
+        queuedJobs: stats.queued_jobs,
+        runningJobs: stats.running_jobs,
+        completedJobs: stats.completed_jobs,
+        deadLetterJobs: stats.dead_letter_jobs,
+        dailyJobs: trendResult.rows,
+      });
+    } catch (error) {
+      console.error("Failed to fetch job stats:", error.message);
+      res.status(500).json({ error: "Failed to fetch job statistics" });
+    }
+});  
+
 router.get("/:id", async (req, res) => {
     try {
         const result = await pool.query(
