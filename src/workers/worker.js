@@ -1,4 +1,5 @@
 const pool = require("../db");
+const { registerWorker, heartbeatWorker, stopWorker } = require("./registry");
 const workerId = `worker-${process.pid}`;
 
 let isShuttingDown = false;
@@ -269,6 +270,13 @@ async function processJob(
 async function startWorker() {
     console.log(`Worker ${process.pid} started`);
 
+    await registerWorker(workerId);
+    const registryHeartbeat = setInterval(() => {
+        heartbeatWorker(workerId).catch(error => {
+            console.error(`Worker heartbeat failed for ${workerId}:`, error.message);
+        });
+    }, 5000);
+
     let queueEmpty = false;
 
     try {
@@ -294,7 +302,14 @@ async function startWorker() {
         }
     }
     finally {
-        await pool.end();
+        clearInterval(registryHeartbeat);
+        try {
+            await stopWorker(workerId);
+        } catch (error) {
+            console.error(`Failed to mark ${workerId} as stopped:`, error.message);
+        } finally {
+            await pool.end();
+        }
 
         console.log(`Worker ${process.pid} shut down cleanly`);
     }

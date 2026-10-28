@@ -23,3 +23,10 @@ CREATE TABLE processed_jobs (
     idempotency_key VARCHAR(255) PRIMARY KEY,
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE workers (
+    worker_id VARCHAR(100) PRIMARY KEY,
+    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    stopped_at TIMESTAMP
+);
