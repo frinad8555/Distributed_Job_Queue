@@ -84,8 +84,8 @@ async function processJob(
             [job.id, workerId]
         );
         await client.query(
-            "INSERT INTO job_events (job_id, event_type, queue_delta) VALUES ($1, 'started', -1)",
-            [job.id]
+            "INSERT INTO job_events (job_id, event_type, worker_id, details, queue_delta) VALUES ($1, 'started', $2, '{}'::jsonb, -1)",
+            [job.id, workerId]
         );
 
         if (isShuttingDown) {
@@ -159,8 +159,8 @@ async function processJob(
                 WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
                 RETURNING id
              )
-             INSERT INTO job_events (job_id, event_type, queue_delta)
-             SELECT id, 'completed', 0 FROM completed_job
+             INSERT INTO job_events (job_id, event_type, worker_id, details, queue_delta)
+             SELECT id, 'completed', $2, '{}'::jsonb, 0 FROM completed_job
              RETURNING job_id`,
             [job.id, workerId]
         );
@@ -206,8 +206,10 @@ async function processJob(
                         WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
                         RETURNING id
                      )
-                     INSERT INTO job_events (job_id, event_type, queue_delta)
-                     SELECT id, 'retry_queued', 1 FROM retry_job
+                     INSERT INTO job_events (job_id, event_type, worker_id, details, queue_delta)
+                     SELECT id, 'retry_queued', $2,
+                            JSON_BUILD_OBJECT('retryCount', $3, 'delaySeconds', $4, 'error', $5), 1
+                     FROM retry_job
                      RETURNING job_id`,
                     [
                       job.id,
@@ -239,8 +241,10 @@ async function processJob(
                         WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
                         RETURNING id
                      )
-                     INSERT INTO job_events (job_id, event_type, queue_delta)
-                     SELECT id, 'dead_lettered', 0 FROM failed_job
+                     INSERT INTO job_events (job_id, event_type, worker_id, details, queue_delta)
+                     SELECT id, 'dead_lettered', $2,
+                            JSON_BUILD_OBJECT('error', $3), 0
+                     FROM failed_job
                      RETURNING job_id`,
                     [
                       job.id,

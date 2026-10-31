@@ -17,8 +17,8 @@ async function recoverJobs() {
               AND last_heartbeat < CURRENT_TIMESTAMP - ($1 * INTERVAL '1 second')
             RETURNING id
          ), logged_events AS (
-            INSERT INTO job_events (job_id, event_type, queue_delta)
-            SELECT id, 'recovered', 1 FROM recovered_jobs
+            INSERT INTO job_events (job_id, event_type, details, queue_delta)
+            SELECT id, 'recovered', JSON_BUILD_OBJECT('source', 'heartbeat timeout'), 1 FROM recovered_jobs
             RETURNING job_id
          )
          SELECT id FROM recovered_jobs`,

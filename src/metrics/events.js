@@ -9,13 +9,19 @@ async function ensureMetricsSchema() {
             await pool.query(
                 `CREATE TABLE IF NOT EXISTS job_events (
                     id BIGSERIAL PRIMARY KEY,
-                    job_id BIGINT NOT NULL,
+                    job_id BIGINT,
                     event_type VARCHAR(40) NOT NULL,
+                    worker_id VARCHAR(100),
+                    details JSONB NOT NULL DEFAULT '{}'::jsonb,
                     queue_delta INT NOT NULL DEFAULT 0,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )`
             );
+            await pool.query("ALTER TABLE job_events ALTER COLUMN job_id DROP NOT NULL");
+            await pool.query("ALTER TABLE job_events ADD COLUMN IF NOT EXISTS worker_id VARCHAR(100)");
+            await pool.query("ALTER TABLE job_events ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb");
             await pool.query("CREATE INDEX IF NOT EXISTS job_events_created_at_idx ON job_events (created_at)");
+            await pool.query("CREATE INDEX IF NOT EXISTS job_events_worker_id_idx ON job_events (worker_id)");
             await pool.query(
                 `CREATE TABLE IF NOT EXISTS metrics_metadata (
                     key VARCHAR(100) PRIMARY KEY,

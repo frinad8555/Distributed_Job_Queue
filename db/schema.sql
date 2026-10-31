@@ -34,13 +34,16 @@ CREATE TABLE workers (
 
 CREATE TABLE job_events (
     id BIGSERIAL PRIMARY KEY,
-    job_id BIGINT NOT NULL,
+    job_id BIGINT,
     event_type VARCHAR(40) NOT NULL,
+    worker_id VARCHAR(100),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
     queue_delta INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX job_events_created_at_idx ON job_events (created_at);
+CREATE INDEX job_events_worker_id_idx ON job_events (worker_id);
 
 CREATE TABLE metrics_metadata (
     key VARCHAR(100) PRIMARY KEY,

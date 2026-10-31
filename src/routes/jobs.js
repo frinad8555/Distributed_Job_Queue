@@ -323,8 +323,8 @@ router.post("/:id/retry", async (req, res) => {
                 WHERE id = $1 AND status = 'DEAD_LETTER'
                 RETURNING *
              ), logged_event AS (
-                INSERT INTO job_events (job_id, event_type, queue_delta)
-                SELECT id, 'retry_queued', 1 FROM requeued_job
+                INSERT INTO job_events (job_id, event_type, details, queue_delta)
+                SELECT id, 'retry_queued', JSON_BUILD_OBJECT('source', 'manual'), 1 FROM requeued_job
                 RETURNING job_id
              )
              SELECT * FROM requeued_job`,
