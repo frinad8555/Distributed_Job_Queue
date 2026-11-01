@@ -15,7 +15,7 @@ A PostgreSQL-backed job queue with a React dashboard for submitting jobs and mon
 
 ## Run locally
 
-Create a PostgreSQL database, apply `db/schema.sql`, and configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` in `.env`. Then run the API, worker, and dashboard in separate terminals:
+Copy `.env.example` to `.env`, set your PostgreSQL connection values, create the database, and apply `db/schema.sql`. Install dependencies from the repository root and `client` directory. Then run the API, worker, and dashboard in separate terminals:
 
 ```sh
 npm install
@@ -41,3 +41,8 @@ Start the API and at least one worker, then run `node load-test/run.js`. It subm
 - The worker currently simulates job execution with a configurable delay; it does not dispatch real application tasks by job type.
 - The API and dashboard do not include authentication or authorization, so they are intended for local development and demos, not direct public deployment.
 - The load test is a synthetic end-to-end check, not a production capacity benchmark; results depend on the machine and database used.
+
+## Dashboard Images
+
+![QueueFlow dashboard](images/dash1.png)
+![QueueFlow metrics dashboard](images/dash2_metric.png)
