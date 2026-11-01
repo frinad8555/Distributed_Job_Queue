@@ -6,7 +6,6 @@ import {
   ArrowUpRight,
   Bell,
   CheckCircle2,
-  ChevronDown,
   CircleHelp,
   Clock3,
   Code2,
@@ -42,6 +41,7 @@ import {
 
 const REFRESH_INTERVAL_KEY = "queueflow-refresh-interval";
 const DEFAULT_REFRESH_INTERVAL = 5000;
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 function readRefreshInterval() {
   try {
@@ -348,20 +348,6 @@ function Sidebar({ activePage, setActivePage, onClose }) {
           <Settings2 size={17} />
           Settings
         </button>
-        <div className="mt-3 flex items-center gap-3 rounded-lg bg-slate-800/50 p-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-blue-500 text-xs font-semibold text-white">
-            QF
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-slate-200">
-              Local development
-            </p>
-            <p className="mt-1 truncate text-[10px] text-slate-500">
-              Queue service
-            </p>
-          </div>
-          <Ellipsis size={17} className="text-slate-500" />
-        </div>
       </div>
     </aside>
   );
@@ -399,11 +385,9 @@ function Header({ activePage, onMenuClick }) {
           <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-violet-400 ring-2 ring-[#0B1020]" />
         </button>
         <div className="hidden h-8 w-px bg-dashboard-border sm:block" />
-        <div className="hidden items-center gap-2 sm:flex">
-          <span className="h-2 w-2 rounded-full bg-emerald-400" />
-          <span className="text-xs text-slate-400">Local</span>
-          <ChevronDown size={14} className="text-slate-500" />
-        </div>
+        <span className="hidden max-w-[240px] truncate text-xs text-slate-400 sm:block" title={API_URL}>
+          {API_URL}
+        </span>
       </div>
     </header>
   );
